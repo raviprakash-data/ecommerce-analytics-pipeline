@@ -40,20 +40,25 @@ ecommerce-analytics-pipeline/
 
 ## Data Source
 
-[Olist Brazilian E-Commerce Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) — 100K+ real orders placed between 2016–2018, covering the full customer journey from order placement to delivery and review.
+## Data Source
 
-| Table | Description |
+[Olist Brazilian E-Commerce Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) — Brazilian e-commerce data containing 100K+ orders placed between 2016–2018, covering the customer journey from order placement through delivery and review.
+
+The 9 raw CSV source files are stored in the Databricks Unity Catalog Volume:
+
+`/Volumes/retail_lakehouse/bronze/raw_files/`
+
+| Source File | Description |
 |---|---|
-| orders | Central transaction table — order status and timestamps |
-| order_items | Line items per order — price, freight, product and seller |
-| order_payments | Payment method and value per order |
-| order_reviews | Customer review scores and comments |
-| customers | Customer location and identifier |
-| sellers | Seller location and identifier |
-| products | Product attributes and category |
-| product_category_translation | Portuguese to English category name mapping |
-| geolocation | Brazilian zip code to lat/lng mapping |
-
+| `olist_orders_dataset.csv` | Central order-level data including order status and timestamps |
+| `olist_order_items_dataset.csv` | Line items per order including price, freight, product and seller |
+| `olist_order_payments_dataset.csv` | Payment method, installments and payment value per order |
+| `olist_order_reviews_dataset.csv` | Customer review scores and comments |
+| `olist_customers_dataset.csv` | Customer identifiers and location information |
+| `olist_sellers_dataset.csv` | Seller identifiers and location information |
+| `olist_products_dataset.csv` | Product attributes and category information |
+| `product_category_name_translation.csv` | Portuguese-to-English product category name mapping |
+| `olist_geolocation_dataset.csv` | Brazilian ZIP-code prefix and geographic coordinates |
 ## Data Observations & Engineering Decisions
 
 *(Fill in as you find them — this is the most important section for interviews. Don't write it retroactively; log each issue in `notes/build-log.md` the moment you hit it, then summarize here.)*
@@ -66,7 +71,28 @@ What the raw data does wrong, why it matters, how you fixed it, what test/check 
 ## Pipeline Layers
 
 ### Bronze — Raw Ingestion
-*(Fill in after building Bronze notebooks: what path CSVs are read from, what options were needed — e.g. multiline handling — what audit columns you added.)*
+
+Raw Olist CSV files are stored in the Databricks Unity Catalog Volume:
+
+`/Volumes/retail_lakehouse/bronze/raw_files/`
+
+The Bronze layer reads the raw CSV files using PySpark with:
+
+- `header=True` to treat the first row as column names.
+- `inferSchema=True` to infer the data types.
+
+Each Bronze table includes two audit columns:
+
+- `ingestion_timestamp` — timestamp when the pipeline ingests the record.
+- `source_file` — identifies the source CSV file.
+
+The data is written as Delta tables under the `retail_lakehouse.bronze` schema.
+
+For the initial development load, the tables use `overwrite` mode.
+
+Example:
+
+`olist_orders_dataset.csv` → `retail_lakehouse.bronze.orders`
 
 ### Silver — Cleaning & Standardisation
 *(Fill in after Silver: what cleaning/dedup/join logic each model handles.)*
