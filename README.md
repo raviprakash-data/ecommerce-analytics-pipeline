@@ -61,41 +61,71 @@ The 9 raw CSV source files are stored in the Databricks Unity Catalog Volume:
 | `olist_geolocation_dataset.csv` | Brazilian ZIP-code prefix and geographic coordinates |
 ## Data Observations & Engineering Decisions
 
-*(Fill in as you find them — this is the most important section for interviews. Don't write it retroactively; log each issue in `notes/build-log.md` the moment you hit it, then summarize here.)*
+**Audit column naming inconsistency**
+Initial Bronze dev iteration used `ingesttime` as the audit timestamp column name on a re-run of `orders`, while the original `ingest_orders` notebook had used `ingestion_timestamp`. Standardized on `ingestion_timestamp` across all 9 tables and re-ran ingestion with `overwriteSchema=true` to apply the fix cleanly. Lesson: define audit column names as constants once ingestion logic is parameterized, rather than relying on remembering a fixed string across notebooks.
 
-**Example format:**
+**Null delivery timestamps in `orders`**
+`order_delivered_carrier_date` and `order_delivered_customer_date` are null for orders that haven't reached those stages yet (e.g. `shipped`, `canceled`, `unavailable` statuses). This is expected, status-dependent behavior, not missing/broken data. To be validated explicitly in Silver: confirm the null pattern lines up with `order_status`, and flag any `delivered` order with a null delivery date as a genuine data quality issue rather than assuming all nulls are fine.
 
-**[Issue name]**
-What the raw data does wrong, why it matters, how you fixed it, what test/check catches it going forward.
+**`geolocation` scale vs. other tables**
+`geolocation` ingested ~1,000,163 rows vs. ~99,000–112,000 for order-level tables. This is expected — it's ZIP-code-prefix-level geographic data, not order-level, so many rows map to the same order/customer. Confirms ingestion is capturing full source data rather than something being incorrectly filtered.
 
 ## Pipeline Layers
 
 ### Bronze — Raw Ingestion
 
-Raw Olist CSV files are stored in the Databricks Unity Catalog Volume:
+All 9 raw Olist CSV files ingested from the Unity Catalog volume:
 
 `/Volumes/retail_lakehouse/bronze/raw_files/`
 
-The Bronze layer reads the raw CSV files using PySpark with:
+Built as a single parameterized notebook (`ingest_bronze`) rather than one notebook per source — a config list of `(csv_filename, table_name)` pairs drives a shared ingestion function, so every table goes through identical, reviewable logic:
 
-- `header=True` to treat the first row as column names.
-- `inferSchema=True` to infer the data types.
+- `header=True`, `inferSchema=True` on CSV read
+- `ingestion_timestamp` and `source_file` audit columns added to every row
+- Written as Delta tables under `retail_lakehouse.bronze`, `mode="overwrite"` (appropriate for this static, one-time dataset — see note below on why `overwrite` was chosen over `append`/`merge`)
 
-Each Bronze table includes two audit columns:
+**Write mode decision:** `overwrite` was used since the Olist dataset is static (no daily-changing source). For data that changes over time — e.g. an `orders` table where existing rows get status updates — `append` alone would create duplicate rows for the same entity, since `append` has no concept of record identity. That case requires `MERGE` (upsert: update if the record exists, insert if it doesn't). `append` alone is only safe for genuinely immutable, event-style data (logs, clickstream, sensor readings) where a record, once written, never changes.
 
-- `ingestion_timestamp` — timestamp when the pipeline ingests the record.
-- `source_file` — identifies the source CSV file.
-
-The data is written as Delta tables under the `retail_lakehouse.bronze` schema.
-
-For the initial development load, the tables use `overwrite` mode.
-
-Example:
-
-`olist_orders_dataset.csv` → `retail_lakehouse.bronze.orders`
+| Bronze Table | Row Count |
+|---|---|
+| `orders` | 99,441 |
+| `order_items` | 112,650 |
+| `order_payments` | 103,886 |
+| `order_reviews` | 104,162 |
+| `customers` | 99,441 |
+| `sellers` | 3,095 |
+| `products` | 32,951 |
+| `category_name` | 71 |
+| `geolocation` | 1,000,163 |
 
 ### Silver — Cleaning & Standardisation
-*(Fill in after Silver: what cleaning/dedup/join logic each model handles.)*
+
+Silver applies data-quality validation and business-rule-based transformations
+before data is used by the Gold layer.
+
+Current progress:
+
+- `category_name` — completed
+  - 71 records validated
+  - No NULL values
+  - No duplicate records
+  - No whitespace or casing issues
+  - Audit columns validated
+  - Business completeness checked against `products`
+  - 3 unmatched category values identified: `pc_gamer`,
+    `portateis_cozinha_e_preparadores_de_alimentos`, and `NULL`
+  - No unsupported manual corrections applied
+  - Gold will use a `LEFT JOIN` when applying category translations so
+    unmatched product records are retained
+
+- `orders` — in progress
+- `order_items` — pending
+- `order_payments` — pending
+- `order_reviews` — pending
+- `customers` — pending
+- `sellers` — pending
+- `products` — pending
+- `geolocation` — pending
 
 ### Gold — Business Intelligence
 

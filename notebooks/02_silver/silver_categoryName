@@ -1,0 +1,106 @@
+from pyspark.sql import functions as F
+
+# load bronze table
+df = spark.table("retail_lakehouse.bronze.category_name")
+
+# check schema
+df.printSchema()
+
+# row count
+row_count = df.count()
+print(f"Total records: {row_count}")
+
+# null check
+null_counts = df.select([
+    F.sum(F.col(c).isNull().cast("int")).alias(c)
+    for c in df.columns
+])
+null_counts.show()
+
+# duplicate check
+duplicate_count = df.count() - df.dropDuplicates().count()
+print(f"Duplicate records: {duplicate_count}")
+
+# distinct value counts
+df.select(
+    F.countDistinct("product_category_name").alias("product_category_name_distinct"),
+    F.countDistinct("product_category_name_english").alias("product_category_name_english_distinct")
+).show()
+
+# check for whitespace/empty values
+string_quality_check = df.filter(
+    (F.col("product_category_name") != F.trim(F.col("product_category_name"))) |
+    (F.col("product_category_name_english") != F.trim(F.col("product_category_name_english"))) |
+    (F.length(F.trim(F.col("product_category_name"))) == 0) |
+    (F.length(F.trim(F.col("product_category_name_english"))) == 0)
+)
+string_quality_check.show(truncate=False)
+
+# check for uppercase inconsistency
+case_quality_check = df.filter(
+    (F.col("product_category_name") != F.lower(F.col("product_category_name"))) |
+    (F.col("product_category_name_english") != F.lower(F.col("product_category_name_english")))
+)
+case_quality_check.show(truncate=False)
+
+# check audit columns
+df.select(
+    F.count(F.when(F.col("ingestion_timestamp").isNull(), 1)).alias("null_ingestion_timestamp"),
+    F.count(F.when(F.col("source_file").isNull(), 1)).alias("null_source_file"),
+    F.countDistinct("ingestion_timestamp").alias("distinct_ingestion_timestamps"),
+    F.countDistinct("source_file").alias("distinct_source_files")
+).show()
+
+# eyeball the mappings
+df.select("product_category_name", "product_category_name_english") \
+  .orderBy("product_category_name") \
+  .show(100, truncate=False)
+
+# check: are all product categories actually mapped here?
+products_categories = spark.table("retail_lakehouse.bronze.products") \
+    .select("product_category_name").distinct()
+
+unmapped_categories = products_categories.join(
+    df, on="product_category_name", how="left_anti"
+)
+unmapped_categories.show(truncate=False)
+print(f"Unmapped category count: {unmapped_categories.count()}")
+
+# found: 3 unmapped categories (pc_gamer, NULL, kitchen-appliance category)
+# decision: use left join in Gold, don't drop these products
+
+# final silver columns - no cleaning needed, data was already clean
+silver_df = df.select(
+    "product_category_name",
+    "product_category_name_english",
+    "ingestion_timestamp",
+    "source_file"
+)
+
+# validate before writing
+silver_row_count = silver_df.count()
+silver_duplicate_count = silver_row_count - silver_df.dropDuplicates().count()
+silver_null_counts = silver_df.select([
+    F.sum(F.col(c).isNull().cast("int")).alias(c)
+    for c in silver_df.columns
+]).collect()[0]
+
+print(f"Silver row count: {silver_row_count}")
+print(f"Silver duplicate records: {silver_duplicate_count}")
+print("Silver null counts:")
+for column, count_value in silver_null_counts.asDict().items():
+    print(f"  {column}: {count_value}")
+
+# write to silver
+silver_df.write \
+    .format("delta") \
+    .mode("overwrite") \
+    .saveAsTable("retail_lakehouse.silver.category_name")
+
+# verify write
+silver_table = spark.table("retail_lakehouse.silver.category_name")
+silver_table.show(10, truncate=False)
+
+# final count check
+final_count = silver_table.count()
+print(f"Final Silver record count: {final_count}")

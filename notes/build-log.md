@@ -79,3 +79,26 @@ Verified the Bronze table using:
 SELECT *
 FROM retail_lakehouse.bronze.orders
 LIMIT 10;
+
+## Category Name — Silver
+
+- Source: `retail_lakehouse.bronze.category_name`
+- Target: `retail_lakehouse.silver.category_name`
+- Records: 71
+- NULLs: 0
+- Duplicates: 0
+- Whitespace/case/empty-string issues: None
+- Audit columns: Valid
+
+### Business Completeness
+
+A `LEFT ANTI JOIN` against `products` identified 3 unmatched category values:
+`pc_gamer`, `portateis_cozinha_e_preparadores_de_alimentos`, and `NULL`.
+
+### Decision
+
+No unnecessary cleansing transformations were applied because the source passed
+the technical quality checks.
+
+The Gold layer will use a `LEFT JOIN` for category translation so unmatched
+product categories are retained.
