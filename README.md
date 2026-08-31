@@ -40,8 +40,6 @@ ecommerce-analytics-pipeline/
 
 ## Data Source
 
-## Data Source
-
 [Olist Brazilian E-Commerce Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) — Brazilian e-commerce data containing 100K+ orders placed between 2016–2018, covering the customer journey from order placement through delivery and review.
 
 The 9 raw CSV source files are stored in the Databricks Unity Catalog Volume:
@@ -118,7 +116,19 @@ Current progress:
   - Gold will use a `LEFT JOIN` when applying category translations so
     unmatched product records are retained
 
-- `orders` — in progress
+- `orders` — completed
+  - 99,441 records validated
+  - No duplicate records
+  - NULL values profiled against `order_status`
+  - 8 delivered orders missing customer delivery date identified
+  - 0 approved-before-purchase violations found
+  - 23 carrier-date-after-customer-date violations identified
+  - Timestamp columns validated as `timestamp`
+  - `order_status` validated for whitespace and casing
+  - Data-quality flags added instead of deleting or modifying affected records
+  - Final row count validated: 99,441
+  - Silver table written to `retail_lakehouse.silver.orders`
+
 - `order_items` — pending
 - `order_payments` — pending
 - `order_reviews` — pending

@@ -1,0 +1,147 @@
+from pyspark.sql.functions import col, when, sum, trim, lower
+
+# load bronze
+df = spark.read.table("retail_lakehouse.bronze.orders")
+df.show(10, truncate=False)
+
+# row count
+bronze_row_count = df.count()
+print("Total row count:", bronze_row_count)
+
+# schema check
+df.printSchema()
+
+# null check per column
+df.select([
+    sum(when(col(c).isNull(), 1).otherwise(0)).alias(c)
+    for c in df.columns
+]).show()
+
+# duplicate row check
+duplicate_count = df.count() - df.dropDuplicates().count()
+print("Duplicate record count:", duplicate_count)
+
+# duplicate order_id check
+df.groupBy("order_id") \
+    .count() \
+    .filter(col("count") > 1) \
+    .show()
+
+# null delivery dates by status
+df.groupBy("order_status").agg(
+    sum(when(col("order_approved_at").isNull(), 1).otherwise(0)).alias("null_approved_at"),
+    sum(when(col("order_delivered_carrier_date").isNull(), 1).otherwise(0)).alias("null_carrier_date"),
+    sum(when(col("order_delivered_customer_date").isNull(), 1).otherwise(0)).alias("null_customer_date")
+).show()
+
+# rule check: delivered but no delivery date
+delivered_missing_date = df.filter(
+    (col("order_status") == "delivered") &
+    (col("order_delivered_customer_date").isNull())
+)
+delivered_missing_date_count = delivered_missing_date.count()
+print("Delivered orders missing customer delivery date:", delivered_missing_date_count)
+
+if delivered_missing_date_count > 0:
+    delivered_missing_date.select(
+        "order_id", "order_status", "order_purchase_timestamp",
+        "order_approved_at", "order_delivered_carrier_date",
+        "order_delivered_customer_date", "order_estimated_delivery_date"
+    ).show(20, truncate=False)
+
+# rule check: approved before purchase
+approved_before_purchase = df.filter(
+    col("order_approved_at") < col("order_purchase_timestamp")
+)
+approved_before_purchase_count = approved_before_purchase.count()
+print("Approved before purchase violations:", approved_before_purchase_count)
+
+if approved_before_purchase_count > 0:
+    approved_before_purchase.select(
+        "order_id", "order_status", "order_purchase_timestamp", "order_approved_at"
+    ).show(20, truncate=False)
+
+# rule check: carrier date after customer delivery date
+carrier_after_customer_delivery = df.filter(
+    (col("order_delivered_carrier_date").isNotNull()) &
+    (col("order_delivered_customer_date").isNotNull()) &
+    (col("order_delivered_carrier_date") > col("order_delivered_customer_date"))
+)
+carrier_after_customer_delivery_count = carrier_after_customer_delivery.count()
+print("Carrier date after customer delivery violations:", carrier_after_customer_delivery_count)
+
+if carrier_after_customer_delivery_count > 0:
+    carrier_after_customer_delivery.select(
+        "order_id", "order_status", "order_delivered_carrier_date", "order_delivered_customer_date"
+    ).show(20, truncate=False)
+
+df_silver = df
+
+# clean status text
+df_silver = df_silver.withColumn(
+    "order_status",
+    lower(trim(col("order_status")))
+)
+
+# flag: delivered but missing date
+df_silver = df_silver.withColumn(
+    "is_delivered_missing_date",
+    when(
+        (col("order_status") == "delivered") &
+        (col("order_delivered_customer_date").isNull()),
+        True
+    ).otherwise(False)
+)
+
+# flag: approved before purchase
+df_silver = df_silver.withColumn(
+    "is_approved_before_purchase",
+    when(
+        col("order_approved_at") < col("order_purchase_timestamp"),
+        True
+    ).otherwise(False)
+)
+
+# flag: carrier date after delivery date
+df_silver = df_silver.withColumn(
+    "is_carrier_after_customer_delivery",
+    when(
+        (col("order_delivered_carrier_date").isNotNull()) &
+        (col("order_delivered_customer_date").isNotNull()) &
+        (col("order_delivered_carrier_date") > col("order_delivered_customer_date")),
+        True
+    ).otherwise(False)
+)
+
+df_silver.show(10, truncate=False)
+
+# row count check vs bronze
+final_row_count = df_silver.count()
+print("Bronze row count:", bronze_row_count)
+print("Final Silver row count:", final_row_count)
+
+if bronze_row_count == final_row_count:
+    print("PASS: Row count matches Bronze.")
+else:
+    print("FAIL: Row count does not match Bronze.")
+
+# flag counts
+df_silver.select(
+    sum(when(col("is_delivered_missing_date"), 1).otherwise(0)).alias("delivered_missing_date_count"),
+    sum(when(col("is_approved_before_purchase"), 1).otherwise(0)).alias("approved_before_purchase_count"),
+    sum(when(col("is_carrier_after_customer_delivery"), 1).otherwise(0)).alias("carrier_after_customer_delivery_count")
+).show()
+
+# write to silver
+df_silver.write \
+    .format("delta") \
+    .mode("overwrite") \
+    .option("overwriteSchema", "true") \
+    .saveAsTable("retail_lakehouse.silver.orders")
+
+print("Silver table written successfully: retail_lakehouse.silver.orders")
+
+# verify write
+silver_df = spark.read.table("retail_lakehouse.silver.orders")
+print("Final Silver table row count:", silver_df.count())
+silver_df.printSchema()

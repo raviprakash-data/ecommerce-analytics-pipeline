@@ -102,3 +102,97 @@ the technical quality checks.
 
 The Gold layer will use a `LEFT JOIN` for category translation so unmatched
 product categories are retained.
+
+---
+
+## 2026-08-31 — Orders Silver Transformation
+
+### Profiling
+
+Completed profiling of the Bronze `orders` table.
+
+- Row count: `99,441`
+- Duplicate records: `0`
+- Schema validated
+- Timestamp columns confirmed as `timestamp`
+- NULL values checked by column
+- NULL patterns analysed against `order_status`
+- `order_status` checked for whitespace and casing issues
+
+### Business Rule Validation
+
+#### Delivered Orders Missing Customer Delivery Date
+
+Found `8` records where:
+
+`order_status = 'delivered'`
+
+and:
+
+`order_delivered_customer_date IS NULL`
+
+Added:
+
+`is_delivered_missing_date`
+
+The records were retained because the correct delivery date could not
+be reliably determined.
+
+#### Approval Before Purchase
+
+Checked:
+
+`order_approved_at < order_purchase_timestamp`
+
+Result:
+
+`0` violations
+
+Added:
+
+`is_approved_before_purchase`
+
+#### Carrier Date After Customer Delivery Date
+
+Checked:
+
+`order_delivered_carrier_date > order_delivered_customer_date`
+
+Result:
+
+`23` violations
+
+Added:
+
+`is_carrier_after_customer_delivery`
+
+The original timestamp values were retained and the records were flagged.
+
+### Transformations
+
+- Standardised `order_status` using `trim()` and `lower()`.
+- Added three data-quality flags.
+- No records were dropped.
+- Existing timestamp columns were retained as `timestamp`.
+
+### Final Validation
+
+| Check | Result |
+|---|---:|
+| Bronze row count | `99,441` |
+| Final Silver row count | `99,441` |
+| Delivered missing customer date | `8` |
+| Approved before purchase | `0` |
+| Carrier after customer delivery | `23` |
+
+The final row count matched Bronze exactly.
+
+### Engineering Decision
+
+Data-quality issues were flagged rather than deleted or manually corrected.
+This preserves the original records while making potential issues visible
+to downstream Gold-layer processing.
+
+The validated dataset was written to:
+
+`retail_lakehouse.silver.orders`
