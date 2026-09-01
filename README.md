@@ -120,6 +120,11 @@ Current progress:
   - 99,441 records validated
   - No duplicate records
   - NULL values profiled against `order_status`
+  - NULL counts identified:
+    - `order_approved_at`: 160
+    - `order_delivered_carrier_date`: 1,783
+    - `order_delivered_customer_date`: 2,965
+  - NULL delivery timestamps were analysed against `order_status`
   - 8 delivered orders missing customer delivery date identified
   - 0 approved-before-purchase violations found
   - 23 carrier-date-after-customer-date violations identified
@@ -128,6 +133,20 @@ Current progress:
   - Data-quality flags added instead of deleting or modifying affected records
   - Final row count validated: 99,441
   - Silver table written to `retail_lakehouse.silver.orders`
+
+- `customers` — completed
+  - 99,441 records validated
+  - No NULL values
+  - No duplicate records
+  - No duplicate `customer_id` values
+  - `customer_id` confirmed unique across all 99,441 records
+  - `customer_unique_id` has 96,096 distinct values and can repeat
+  - 27 distinct `customer_state` values identified
+  - No leading/trailing whitespace found in `customer_city`
+  - No casing issues found in `customer_city`
+  - No cleansing transformation required because the source data already passed the checks
+  - Final row count validated: 99,441
+  - Silver table written to `retail_lakehouse.silver.customers`
 
 - `order_items` — pending
 - `order_payments` — pending

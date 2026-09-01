@@ -1,0 +1,97 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, trim, lower, count, sum, when
+
+# start spark session
+spark = SparkSession.builder \
+    .appName("Customers Silver Transformation") \
+    .getOrCreate()
+
+# load bronze
+df = spark.read.table("retail_lakehouse.bronze.customers")
+
+# sample rows
+df.show(10, truncate=False)
+
+# schema check
+df.printSchema()
+
+# row count
+bronze_count = df.count()
+print("Bronze row count:", bronze_count)
+
+# null check
+null_counts = df.select([
+    sum(when(col(c).isNull(), 1).otherwise(0)).alias(c)
+    for c in df.columns
+])
+null_counts.show()
+
+# duplicate row check
+duplicate_count = df.count() - df.dropDuplicates().count()
+print("Duplicate complete records:", duplicate_count)
+
+# duplicate customer_id check
+duplicate_customer_id = df.groupBy("customer_id") \
+    .count() \
+    .filter(col("count") > 1)
+duplicate_customer_id.show()
+print("Duplicate customer_id count:", duplicate_customer_id.count())
+
+# distinct customer_id
+distinct_customer_id = df.select("customer_id").distinct().count()
+print("Distinct customer_id:", distinct_customer_id)
+
+# distinct customer_unique_id
+distinct_customer_unique_id = df.select("customer_unique_id").distinct().count()
+print("Distinct customer_unique_id:", distinct_customer_unique_id)
+
+# repeated customer_unique_id (same person, multiple orders)
+repeated_customer_unique_id = df.groupBy("customer_unique_id") \
+    .count().filter(col("count") > 1)
+repeated_customer_unique_id.show(20, truncate=False)
+print("Repeated customer_unique_id values:", repeated_customer_unique_id.count())
+
+# distinct states count
+distinct_states = df.select("customer_state").distinct().count()
+print("Distinct customer_state values:", distinct_states)
+
+# show all states
+df.select("customer_state").distinct().show(27)
+
+# check city whitespace
+city_whitespace_issues = df.filter(
+    col("customer_city") != trim(col("customer_city"))
+).select("customer_city")
+city_whitespace_issues.show(truncate=False)
+print("Customer city whitespace issues:", city_whitespace_issues.count())
+
+# check city casing
+city_casing_issues = df.filter(
+    col("customer_city") != lower(col("customer_city"))
+).select("customer_city")
+city_casing_issues.show(truncate=False)
+print("Customer city casing issues:", city_casing_issues.count())
+
+# no cleaning needed - no nulls, no dupes, customer_id unique, city already clean
+silver_df = df
+
+# row count check
+silver_count = silver_df.count()
+print("Bronze row count:", bronze_count)
+print("Silver row count:", silver_count)
+
+if bronze_count == silver_count:
+    print("Row count validation: PASSED")
+else:
+    print("Row count validation: FAILED")
+
+# write to silver
+silver_df.write \
+    .format("delta") \
+    .mode("overwrite") \
+    .saveAsTable("retail_lakehouse.silver.customers")
+
+# verify write
+final_df = spark.read.table("retail_lakehouse.silver.customers")
+print("Final Silver row count:", final_df.count())
+final_df.show(10, truncate=False)

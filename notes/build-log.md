@@ -196,3 +196,48 @@ to downstream Gold-layer processing.
 The validated dataset was written to:
 
 `retail_lakehouse.silver.orders`
+
+## 2026-09-01 — Customers Silver Validation
+
+### Customers
+
+- Source: `retail_lakehouse.bronze.customers`
+- Target: `retail_lakehouse.silver.customers`
+- Bronze row count: `99,441`
+- Silver row count: `99,441`
+
+### Data Quality Checks
+
+- NULL values: `0`
+- Duplicate complete records: `0`
+- Duplicate `customer_id` values: `0`
+- Distinct `customer_id` values: `99,441`
+- Distinct `customer_unique_id` values: `96,096`
+- Distinct `customer_state` values: `27`
+- Leading/trailing whitespace in `customer_city`: None found
+- Casing issues in `customer_city`: None found
+
+### Customer ID Relationship
+
+`customer_id` is unique across the table, while `customer_unique_id`
+can appear multiple times.
+
+This is expected because multiple `customer_id` records can belong to
+the same underlying customer represented by `customer_unique_id`.
+
+### Cleaning Decision
+
+No cleansing transformation was required for `customer_city` because
+the source data already passed the whitespace and casing checks.
+
+No records were dropped or modified.
+
+### Final Validation
+
+Final row count matched the Bronze row count:
+
+`99,441 = 99,441`
+
+The validated DataFrame was written to:
+
+`retail_lakehouse.silver.customers`
