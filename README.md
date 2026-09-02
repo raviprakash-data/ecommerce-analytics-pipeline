@@ -148,11 +148,27 @@ Current progress:
   - Final row count validated: 99,441
   - Silver table written to `retail_lakehouse.silver.customers`
 
+- `sellers` — completed
+  - 3,095 records validated
+  - No NULL values
+  - No duplicate complete records
+  - No duplicate `seller_id` values
+  - No leading/trailing whitespace found in `seller_city`
+  - `seller_city` validated as lowercase
+  - `seller_state` validated as uppercase
+  - Data types validated
+  - 23 distinct seller states identified
+  - Seller ZIP code prefix range validated: `1,001` to `99,730`
+  - No NULL seller ZIP code prefixes
+  - Repeated ZIP code prefixes found across sellers and treated as valid because multiple sellers can share the same ZIP area
+  - No seller associated with multiple states
+  - No cleansing transformation required because the source data passed the validation checks
+  - Final row count validated: 3,095
+  - Silver table written to `retail_lakehouse.silver.sellers`
+
 - `order_items` — pending
 - `order_payments` — pending
 - `order_reviews` — pending
-- `customers` — pending
-- `sellers` — pending
 - `products` — pending
 - `geolocation` — pending
 

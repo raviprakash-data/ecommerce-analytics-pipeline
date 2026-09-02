@@ -241,3 +241,56 @@ Final row count matched the Bronze row count:
 The validated DataFrame was written to:
 
 `retail_lakehouse.silver.customers`
+
+## 2026-09-02 — Sellers Silver Validation
+
+### Sellers
+
+- Source: `retail_lakehouse.bronze.sellers`
+- Target: `retail_lakehouse.silver.sellers`
+- Bronze row count: `3,095`
+- Silver row count: `3,095`
+
+### Data Quality Checks
+
+- NULL values: `0`
+- Duplicate complete records: `0`
+- Duplicate `seller_id` values: `0`
+- Leading/trailing whitespace in `seller_city`: None found
+- Casing issues in `seller_city`: None found
+- Casing issues in `seller_state`: None found
+- NULL seller ZIP code prefixes: `0`
+- Distinct seller states: `23`
+- Seller ZIP code prefix range: `1,001` to `99,730`
+
+### Seller ID Validation
+
+`seller_id` was confirmed to be unique across the dataset.
+
+No seller was found to be associated with multiple `seller_state` values.
+
+### ZIP Code Validation
+
+Multiple sellers can have the same `seller_zip_code_prefix`.
+
+This was treated as valid because a ZIP code prefix represents a geographic area
+and is not expected to be unique to a seller.
+
+### Cleaning Decision
+
+No cleansing transformation was required.
+
+The source data already passed the whitespace, casing, NULL, duplicate,
+datatype, and business relationship checks.
+
+No records were dropped or manually modified.
+
+### Final Validation
+
+Final row count matched the Bronze row count:
+
+`3,095 = 3,095`
+
+The validated DataFrame was written to:
+
+`retail_lakehouse.silver.sellers`

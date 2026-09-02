@@ -1,0 +1,74 @@
+from pyspark.sql.functions import *
+
+# load bronze
+df = spark.read.table('retail_lakehouse.bronze.sellers')
+df.show()
+df.printSchema()
+print("Total row count:", df.count())
+
+# null check
+df.select([
+    sum(when(col(c).isNull(), 1).otherwise(0)).alias(c)
+    for c in df.columns
+]).show()
+
+# duplicate rows
+duplicate_count = df.count() - df.dropDuplicates().count()
+print("Duplicate complete records:", duplicate_count)
+
+# duplicate seller_id
+df.groupBy('seller_id') \
+    .agg(count('*').alias('count')) \
+    .filter(col('count') > 1) \
+    .show()
+
+# city whitespace
+df.filter(col('seller_city') != trim(col('seller_city'))) \
+    .select('seller_city').show()
+
+# state uppercase check
+df.filter(col('seller_state') != upper(col('seller_state'))) \
+    .select('seller_state').show()
+
+# city lowercase check
+df.filter(col('seller_city') != lower(col('seller_city'))) \
+    .select('seller_city').show()
+
+# distinct states
+print("Distinct seller states:", df.select('seller_state').distinct().count())
+df.select('seller_state').distinct().show()
+
+# zip range check
+df.select('seller_zip_code_prefix').agg(min('seller_zip_code_prefix').alias('min_zip')).show()
+df.select('seller_zip_code_prefix').agg(max('seller_zip_code_prefix').alias('max_zip')).show()
+
+# null zip check
+df.select(sum(col('seller_zip_code_prefix').isNull().cast('int')).alias('null_zip_count')).show()
+
+# repeated zip prefixes (expected, many sellers per zip)
+df.groupBy('seller_zip_code_prefix') \
+    .agg(count('*').alias('count')) \
+    .filter(col('count') > 1) \
+    .show()
+
+# check one seller isn't mapped to multiple states
+df.groupBy('seller_id') \
+    .agg(countDistinct('seller_state').alias('state_count')) \
+    .filter(col('state_count') > 1) \
+    .show()
+
+print("Final validated row count:", df.count())
+
+# no cleaning needed - zero nulls, zero dupes, no whitespace/casing issues, zips valid
+silver_df = df
+
+# write to silver
+silver_df.write \
+    .format('delta') \
+    .mode('overwrite') \
+    .saveAsTable('retail_lakehouse.silver.sellers')
+
+# verify
+silver_df_check = spark.read.table('retail_lakehouse.silver.sellers')
+print("Silver row count:", silver_df_check.count())
+silver_df_check.show()
