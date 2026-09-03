@@ -1,0 +1,103 @@
+from pyspark.sql import functions as F
+
+# load bronze
+df_products = spark.table("retail_lakehouse.bronze.products")
+
+bronze_count = df_products.count()
+print(f"Bronze product row count: {bronze_count}")
+df_products.printSchema()
+df_products.show(5, truncate=False)
+
+# null check
+null_counts = df_products.select([
+    F.sum(F.col(column).isNull().cast("int")).alias(column)
+    for column in df_products.columns
+])
+print("Null counts by column:")
+null_counts.show(truncate=False)
+
+# duplicate product_id check
+duplicate_product_ids = (
+    df_products.groupBy("product_id").count().filter(F.col("count") > 1)
+)
+print(f"Duplicate product IDs: {duplicate_product_ids.count()}")
+
+# check categories against silver.category_name
+df_category = spark.table("retail_lakehouse.silver.category_name")
+
+unmapped_categories = (
+    df_products.select("product_category_name").distinct()
+    .join(df_category.select("product_category_name").distinct(),
+          on="product_category_name", how="left_anti")
+)
+print("Categories missing from category reference table:")
+unmapped_categories.show(truncate=False)
+
+unmapped_product_count = (
+    df_products.filter(F.col("product_category_name").isNotNull())
+    .join(df_category.select("product_category_name").distinct(),
+          on="product_category_name", how="left_anti")
+    .count()
+)
+print(f"Products with non-null unmapped categories: {unmapped_product_count}")
+
+# physical attribute ranges
+physical_ranges = df_products.select(
+    F.min("product_weight_g").alias("min_weight_g"),
+    F.max("product_weight_g").alias("max_weight_g"),
+    F.min("product_length_cm").alias("min_length_cm"),
+    F.max("product_length_cm").alias("max_length_cm"),
+    F.min("product_height_cm").alias("min_height_cm"),
+    F.max("product_height_cm").alias("max_height_cm"),
+    F.min("product_width_cm").alias("min_width_cm"),
+    F.max("product_width_cm").alias("max_width_cm")
+)
+print("Physical attribute ranges:")
+physical_ranges.show()
+
+# zero/negative physical value check
+invalid_physical_values = df_products.filter(
+    (F.col("product_weight_g") <= 0)
+    | (F.col("product_length_cm") <= 0)
+    | (F.col("product_height_cm") <= 0)
+    | (F.col("product_width_cm") <= 0)
+)
+print(f"Products with zero/negative physical values: {invalid_physical_values.count()}")
+
+# decisions: keep nulls/unmapped categories as-is (handled in Gold),
+# don't impute physical attributes, just fix misspelled source column names
+df_products_silver = (
+    df_products
+    .withColumnRenamed("product_name_lenght", "product_name_length")
+    .withColumnRenamed("product_description_lenght", "product_description_length")
+)
+
+# validate before writing
+silver_count = df_products_silver.count()
+print(f"Bronze row count: {bronze_count}")
+print(f"Silver row count: {silver_count}")
+print(f"Row count match: {bronze_count == silver_count}")
+
+silver_duplicate_product_ids = (
+    df_products_silver.groupBy("product_id").count()
+    .filter(F.col("count") > 1).count()
+)
+print(f"Silver duplicate product IDs: {silver_duplicate_product_ids}")
+df_products_silver.printSchema()
+
+# write to silver
+df_products_silver.write \
+    .format("delta") \
+    .mode("overwrite") \
+    .saveAsTable("retail_lakehouse.silver.products")
+
+# verify write
+df_products_check = spark.table("retail_lakehouse.silver.products")
+final_count = df_products_check.count()
+print(f"Final Silver product row count: {final_count}")
+df_products_check.printSchema()
+df_products_check.show(5, truncate=False)
+
+assert final_count == bronze_count, "Row count mismatch between Bronze and Silver"
+assert silver_duplicate_product_ids == 0, "Duplicate product IDs found in Silver"
+print("Products Silver validation completed successfully.")

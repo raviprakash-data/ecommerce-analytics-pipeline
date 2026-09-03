@@ -166,10 +166,29 @@ Current progress:
   - Final row count validated: 3,095
   - Silver table written to `retail_lakehouse.silver.sellers`
 
+- `products` — completed
+  - 32,951 records validated
+  - No duplicate `product_id` values
+  - NULL values profiled
+  - 610 products with NULL `product_category_name`
+  - Product categories validated against `silver.category_name`
+  - 13 products found with non-null unmapped categories
+  - `pc_gamer` and `portateis_cozinha_e_preparadores_de_alimentos` identified as unmapped categories
+  - Physical attributes validated for NULL, zero, and negative values
+  - 4 products found with zero product weight
+  - 2 products found with NULL weight and dimensions
+  - No negative physical values found
+  - Source column naming issues standardized:
+    - `product_name_lenght` → `product_name_length`
+    - `product_description_lenght` → `product_description_length`
+  - No unsupported imputation or deletion applied
+  - Audit columns preserved
+  - Final row count validated: 32,951
+  - Silver table written to `retail_lakehouse.silver.products`
+
 - `order_items` — pending
 - `order_payments` — pending
 - `order_reviews` — pending
-- `products` — pending
 - `geolocation` — pending
 
 ### Gold — Business Intelligence

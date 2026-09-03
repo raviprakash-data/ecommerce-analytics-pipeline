@@ -294,3 +294,24 @@ Final row count matched the Bronze row count:
 The validated DataFrame was written to:
 
 `retail_lakehouse.silver.sellers`
+
+## 2026-09-03 — Silver Products
+
+### Objective
+
+Profile, validate, standardize, and write the Products dataset into the Silver layer.
+
+### Source
+
+`retail_lakehouse.bronze.products`
+
+### Target
+
+`retail_lakehouse.silver.products`
+
+### Profiling
+
+Bronze row count:
+
+```text
+32,951
