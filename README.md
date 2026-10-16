@@ -57,6 +57,7 @@ The 9 raw CSV source files are stored in the Databricks Unity Catalog Volume:
 | `olist_products_dataset.csv` | Product attributes and category information |
 | `product_category_name_translation.csv` | Portuguese-to-English product category name mapping |
 | `olist_geolocation_dataset.csv` | Brazilian ZIP-code prefix and geographic coordinates |
+
 ## Data Observations & Engineering Decisions
 
 **Audit column naming inconsistency**
@@ -101,7 +102,7 @@ Built as a single parameterized notebook (`ingest_bronze`) rather than one noteb
 Silver applies data-quality validation and business-rule-based transformations
 before data is used by the Gold layer.
 
-Current progress:
+Current progress: 6 of 9 tables completed.
 
 - `category_name` — completed
   - 71 records validated
@@ -186,7 +187,24 @@ Current progress:
   - Final row count validated: 32,951
   - Silver table written to `retail_lakehouse.silver.products`
 
-- `order_items` — pending
+- `order_items` — completed
+  - 112,650 records validated, matching the Bronze row count
+  - Data types validated: `price` and `freight_value` are `double`, `order_item_id` is `integer`, `shipping_limit_date` is `timestamp`
+  - No NULL values in any column, including all join keys
+  - `order_id` + `order_item_id` confirmed as a unique composite key
+  - `order_id` alone repeats by design, since one order can contain multiple items
+  - No duplicate records, implied by the unique composite key
+  - 0 orphan `order_id` values against `silver.orders`
+  - 0 orphan `product_id` values against `silver.products`
+  - 0 orphan `seller_id` values against `silver.sellers`
+  - `price` range validated: 0.85 to 6,735.0
+  - `freight_value` range validated: 0.0 to 409.68
+  - 0 rows with zero or negative `price`, and 0 rows with negative `freight_value`
+  - `freight_value` kept as the source column name, matching Olist's documentation
+  - No cleansing transformation required because the source data passed the validation checks
+  - Final row count validated: 112,650
+  - Silver table written to `retail_lakehouse.silver.order_items`
+
 - `order_payments` — pending
 - `order_reviews` — pending
 - `geolocation` — pending

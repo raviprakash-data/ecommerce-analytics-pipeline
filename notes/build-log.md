@@ -24,6 +24,9 @@ retail_lakehouse (Catalog)
 ├── silver (Schema)
 │
 └── gold (Schema)
+```
+
+---
 
 ## 2026-08-14 — Olist Raw Data Uploaded
 
@@ -53,6 +56,8 @@ Approximate sizes were not recorded during upload.
 
 These files represent the raw source data and will be used as the input for the Bronze ingestion process.
 
+---
+
 ## 2026-08-14 — Bronze Orders Ingestion
 
 ### Orders
@@ -79,8 +84,73 @@ Verified the Bronze table using:
 SELECT *
 FROM retail_lakehouse.bronze.orders
 LIMIT 10;
+```
 
-## Category Name — Silver
+---
+
+## 2026-08-28 — Bronze: Remaining 8 Tables Ingested (Parameterized)
+
+Rather than repeat the single-table pattern from `ingest_orders` 8 more times,
+built a parameterized notebook (`ingest_bronze`). A config list of
+`(csv_filename, table_name)` pairs drives one shared ingestion function, so every
+table goes through identical, reviewable logic: read CSV, add audit columns,
+write Delta.
+
+### Row Counts (all 9 tables, verified with a SQL COUNT query)
+
+| Table | Rows |
+|---|---|
+| orders | 99,441 |
+| order_items | 112,650 |
+| order_payments | 103,886 |
+| order_reviews | 104,162 |
+| customers | 99,441 |
+| sellers | 3,095 |
+| products | 32,951 |
+| category_name | 71 |
+| geolocation | 1,000,163 |
+
+Total: 1,555,860 rows across 9 tables (about 15.5 lakh).
+
+Verified against known Olist dataset scale before trusting the ingestion.
+`geolocation` at about 1M rows versus about 100K for order-level tables is
+expected: it is ZIP-prefix-level geographic data, not order-level.
+
+### Issue: audit column naming inconsistency
+
+An early iteration of the parameterized loop used `ingesttime` as the audit
+timestamp column, while the original `ingest_orders` notebook used
+`ingestion_timestamp`. Re-running the loop against the existing `orders` table did
+not throw a schema-mismatch error as expected. This Delta/Databricks behavior is
+worth testing deliberately later rather than assuming documented OSS behavior
+applies as is.
+
+Fix: standardized on `ingestion_timestamp` across all 9 tables and added
+`overwriteSchema=true` so schema changes are deliberate, not accidental.
+
+### Decision: write mode (overwrite vs append vs merge)
+
+Chose `overwrite` because Olist is a static, one-time dataset with no
+daily-changing source to reconcile against.
+
+For future incremental projects: `append` only adds rows and has no concept of
+record identity, so it is safe only for immutable data (event logs, clickstream,
+sensor readings). Any table where an existing record can change over time for the
+same identity (for example `orders`, where `order_status` moves from `shipped` to
+`delivered`) needs `MERGE` (upsert). Plain `append` would create duplicate or
+stale rows.
+
+### Observation: null delivery timestamps in `orders`
+
+`order_delivered_carrier_date` and `order_delivered_customer_date` are null for
+orders that have not reached those stages (status-dependent, for example
+`shipped`, `canceled`, `unavailable`). This is expected, not broken data. To be
+validated in Silver: confirm the null pattern lines up with `order_status`, and
+flag any `delivered` order with a null delivery date.
+
+---
+
+## [add date] — Category Name — Silver
 
 - Source: `retail_lakehouse.bronze.category_name`
 - Target: `retail_lakehouse.silver.category_name`
@@ -137,6 +207,11 @@ Added:
 
 The records were retained because the correct delivery date could not
 be reliably determined.
+
+On inspection these 8 are two different patterns. 7 have a valid
+`order_delivered_carrier_date`, so the order shipped and the final delivery
+timestamp is probably just missing. 1 has no carrier date either, which means it is
+marked delivered with no shipping trail at all, a more serious inconsistency.
 
 #### Approval Before Purchase
 
@@ -197,6 +272,8 @@ The validated dataset was written to:
 
 `retail_lakehouse.silver.orders`
 
+---
+
 ## 2026-09-01 — Customers Silver Validation
 
 ### Customers
@@ -225,6 +302,10 @@ can appear multiple times.
 This is expected because multiple `customer_id` records can belong to
 the same underlying customer represented by `customer_unique_id`.
 
+Gold implication: `customer_id` is effectively unique per order, not per person.
+Any customer-level metric (repeat purchase rate, lifetime value) must group by
+`customer_unique_id`, or every returning customer would be counted as new.
+
 ### Cleaning Decision
 
 No cleansing transformation was required for `customer_city` because
@@ -241,6 +322,8 @@ Final row count matched the Bronze row count:
 The validated DataFrame was written to:
 
 `retail_lakehouse.silver.customers`
+
+---
 
 ## 2026-09-02 — Sellers Silver Validation
 
@@ -295,23 +378,79 @@ The validated DataFrame was written to:
 
 `retail_lakehouse.silver.sellers`
 
+---
+
 ## 2026-09-03 — Silver Products
 
 ### Objective
 
 Profile, validate, standardize, and write the Products dataset into the Silver layer.
 
-### Source
+### Source and Target
 
-`retail_lakehouse.bronze.products`
-
-### Target
-
-`retail_lakehouse.silver.products`
+- Source: `retail_lakehouse.bronze.products`
+- Target: `retail_lakehouse.silver.products`
 
 ### Profiling
 
-Bronze row count:
+- Bronze row count: `32,951`
+- Duplicate `product_id` values: `0`
 
-```text
-32,951
+### NULL Findings
+
+- `product_category_name`, `product_name_lenght`, `product_description_lenght` and
+  `product_photos_qty` each have `610` NULLs. The identical count across four columns
+  suggests the same incomplete listings, although the row overlap was not explicitly
+  checked.
+- `product_weight_g`, `product_length_cm`, `product_height_cm` and
+  `product_width_cm` each have `2` NULLs.
+
+### Category Validation
+
+Checked product categories against `silver.category_name` with a `LEFT ANTI JOIN`.
+`13` products have a non-null category with no translation (`pc_gamer` and
+`portateis_cozinha_e_preparadores_de_alimentos`). Category translation is deferred
+to Gold, which will use a `LEFT JOIN` so these products are retained.
+
+### Physical Attribute Validation
+
+- Negative values: `0`
+- `4` products have `product_weight_g = 0`, and all four share identical dimensions
+  (30 x 25 x 30 cm), which suggests placeholder values rather than real measurements.
+  The true weight is unknown, so they were left unchanged.
+- The first version of this check used `< 0` and reported zero problems. Re-running with
+  `<= 0` found the 4 zero-weight products. Lesson: check boundary conditions
+  deliberately.
+
+### Transformations
+
+Corrected misspelled source column names:
+
+- `product_name_lenght` → `product_name_length`
+- `product_description_lenght` → `product_description_length`
+
+No rows were dropped and no values were imputed. Audit columns were preserved.
+
+### Final Validation
+
+Final row count matched the Bronze row count:
+
+`32,951 = 32,951`
+
+The validated DataFrame was written to:
+
+`retail_lakehouse.silver.products`
+
+---
+
+## 2026-09-04 — Silver: order_items (completed)
+
+- Source: `retail_lakehouse.bronze.order_items`, 112,650 rows, matching the Bronze count.
+- Schema checked: `price` and `freight_value` are double, `order_item_id` is integer, `shipping_limit_date` is already timestamp, so no casting was needed.
+- Nulls: zero in every column, including all four join keys.
+- Key: `order_id` + `order_item_id` is a unique composite key. `order_id` alone repeats by design, since one order can have several items. This also means no full-row duplicates exist.
+- Orphan checks (left_anti against Silver tables): 0 orphan `order_id` vs `silver.orders`, 0 orphan `product_id` vs `silver.products`, 0 orphan `seller_id` vs `silver.sellers`. Every line item points to a real order, product and seller.
+- Value checks: `price` ranges from 0.85 to 6,735.0. `freight_value` ranges from 0.0 to 409.68. 0 rows with zero or negative price, 0 rows with negative freight. Zero freight was not treated as invalid, since free shipping is plausible. The maximum price of 6,735.0 is a high-value outlier but not impossible, so it was left as is.
+- Decision: no cleaning needed, data written to Silver as is. `freight_value` keeps its source name because it matches Olist's own documentation. Gold can alias it as `shipping_cost` if a business-friendly name is needed.
+- Note: `freight_value` is the shipping cost charged for the item. `shipping_limit_date` is the seller's deadline to hand the item to the carrier, not a delivery date.
+- Final row count: 112,650 in Silver, matching Bronze. Written to `retail_lakehouse.silver.order_items`.
